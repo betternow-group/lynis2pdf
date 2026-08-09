@@ -1,0 +1,267 @@
+name: Build lynis2pdf .deb package
+
+"on":
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debian packages
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Pobranie kodu z repozytorium
+        uses: actions/checkout@v4
+
+      - name: Instalacja Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalacja PyInstaller i zależności projektu
+        run: |
+          pip install pyinstaller==6.22.0
+          pip install reportlab==4.4.10
+
+      - name: Budowa binarki
+        run: pyinstaller --onefile --name lynis2pdf lynis2pdf.py
+
+      - name: "Test: --version"
+        timeout-minutes: 1
+        run: |
+          timeout 20 ./dist/lynis2pdf --version
+          echo "Kod wyjścia: $?"
+
+      - name: Ustalenie numeru wersji z taga
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0"
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Wersja pakietu .deb: ${VERSION}"
+
+      - name: Budowa pakietu .deb
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PKGDIR="lynis2pdf_${VERSION}_amd64"
+
+          mkdir -p "$PKGDIR/DEBIAN" "$PKGDIR/usr/bin" "$PKGDIR/usr/share/doc/lynis2pdf" \
+                   "$PKGDIR/usr/share/pixmaps" \
+                   "$PKGDIR/usr/share/icons/hicolor/256x256/apps" \
+                   "$PKGDIR/usr/share/icons/hicolor/128x128/apps" \
+                   "$PKGDIR/usr/share/icons/hicolor/64x64/apps" \
+                   "$PKGDIR/usr/share/icons/hicolor/48x48/apps" \
+                   "$PKGDIR/usr/share/applications" \
+                   "$PKGDIR/usr/share/metainfo"
+          cp dist/lynis2pdf "$PKGDIR/usr/bin/lynis2pdf"
+          chmod 755 "$PKGDIR/usr/bin/lynis2pdf"
+
+          # Skrypt-wrapper uruchamiany WYŁĄCZNIE przez wpis .desktop
+          # (Terminal=true) - uruchamia lynis2pdf, po czym oddaje sterowanie
+          # żywej, interaktywnej powłoce, żeby terminal nie zamykał się
+          # natychmiast po wypisaniu menu. Osobny plik zamiast cudzysłowionej
+          # wartości "bash -c ..." wprost w Exec= - nie zależy od tego, jak
+          # konkretne środowisko graficzne parsuje zagnieżdżone cudzysłowy.
+          test -f assets/lynis2pdf-launcher || { echo "BŁĄD: brak assets/lynis2pdf-launcher"; exit 1; }
+          cp assets/lynis2pdf-launcher "$PKGDIR/usr/bin/lynis2pdf-launcher"
+          chmod 755 "$PKGDIR/usr/bin/lynis2pdf-launcher"
+
+          # Grafika (avatar) pakietu: lokalizacja "klasyczna" (pixmaps -
+          # widoczna od razu, bez odświeżania cache'u) plus pełny zestaw
+          # rozdzielczości w motywie hicolor (menedżery pakietów / centra
+          # oprogramowania z pełnym środowiskiem graficznym). Pliki PNG są
+          # zacommitowane w repozytorium pod assets/.
+          for f in assets/lynis2pdf-256.png assets/lynis2pdf-128.png assets/lynis2pdf-64.png assets/lynis2pdf-48.png; do
+            test -f "$f" || { echo "BŁĄD: brak pliku ikony $f w assets/"; exit 1; }
+          done
+          cp assets/lynis2pdf-64.png  "$PKGDIR/usr/share/pixmaps/lynis2pdf.png"
+          cp assets/lynis2pdf-256.png "$PKGDIR/usr/share/icons/hicolor/256x256/apps/lynis2pdf.png"
+          cp assets/lynis2pdf-128.png "$PKGDIR/usr/share/icons/hicolor/128x128/apps/lynis2pdf.png"
+          cp assets/lynis2pdf-64.png  "$PKGDIR/usr/share/icons/hicolor/64x64/apps/lynis2pdf.png"
+          cp assets/lynis2pdf-48.png  "$PKGDIR/usr/share/icons/hicolor/48x48/apps/lynis2pdf.png"
+
+          # Wpis .desktop + metadane AppStream - BEZ tego pakiet, mimo
+          # posiadania ikony, jest niewidoczny w graficznych centrach
+          # oprogramowania (GNOME Software, KDE Discover itp.), bo te
+          # indeksują aplikacje na podstawie metadanych AppStream/.desktop,
+          # a nie samej listy zainstalowanych paczek. "console-application"
+          # to oficjalny typ komponentu AppStream dla narzędzi CLI (bez GUI).
+          test -f assets/lynis2pdf.desktop || { echo "BŁĄD: brak assets/lynis2pdf.desktop"; exit 1; }
+          test -f assets/group.betternow.lynis2pdf.metainfo.xml || { echo "BŁĄD: brak assets/group.betternow.lynis2pdf.metainfo.xml"; exit 1; }
+          cp assets/lynis2pdf.desktop "$PKGDIR/usr/share/applications/lynis2pdf.desktop"
+          cp assets/group.betternow.lynis2pdf.metainfo.xml "$PKGDIR/usr/share/metainfo/group.betternow.lynis2pdf.metainfo.xml"
+
+          cat > "$PKGDIR/DEBIAN/control" << EOF
+          Package: lynis2pdf
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Kamil Ciaś <kamil.cias@betternow.group>
+          Homepage: https://betternow.group
+          Description: Lynis security-audit to PDF report generator
+           Converts Lynis security-audit results into a professional PDF report
+           enriched with MITRE ATT&CK and OWASP Top 10:2025 context, an expanded
+           configuration-hardening checklist, and copy-paste-ready diagnostic
+           commands.
+          EOF
+
+          # Plik copyright w standardowym formacie DEP-5 (machine-readable) -
+          # to sposób, w jaki pakiety Debiana deklarują licencję (nie ma
+          # osobnego pola "License:" w control). Umieszczony w wymaganej,
+          # standardowej lokalizacji usr/share/doc/<pakiet>/copyright.
+          cat > "$PKGDIR/usr/share/doc/lynis2pdf/copyright" << 'COPYRIGHTEOF'
+          Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+          Upstream-Name: lynis2pdf
+          Source: https://github.com/betternow-group/lynis2pdf
+
+          Files: *
+          Copyright: 2026 Kamil Ciaś <kamil.cias@betternow.group>
+          License: MIT
+
+          Files: usr/share/pixmaps/lynis2pdf.png usr/share/icons/hicolor/*/apps/lynis2pdf.png
+          Copyright: 2026 Kamil Ciaś <kamil.cias@betternow.group>
+          License: MIT
+          Comment: Original package icon, first-party artwork.
+
+          License: MIT
+           Permission is hereby granted, free of charge, to any person obtaining a
+           copy of this software and associated documentation files (the
+           "Software"), to deal in the Software without restriction, including
+           without limitation the rights to use, copy, modify, merge, publish,
+           distribute, sublicense, and/or sell copies of the Software, and to
+           permit persons to whom the Software is furnished to do so, subject to
+           the following conditions:
+           .
+           The above copyright notice and this permission notice shall be included
+           in all copies or substantial portions of the Software.
+           .
+           THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+           IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+           FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+           THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+           OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+           ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+           OTHER DEALINGS IN THE SOFTWARE.
+          COPYRIGHTEOF
+
+          # --- Skrypty konserwacyjne: instalacja / aktualizacja / deinstalacja ---
+          #
+          # postinst uruchamiany jest PO rozpakowaniu plików, z argumentem
+          # $1="configure". Przy aktualizacji (dpkg -i nowszej wersji nad już
+          # zainstalowaną) dpkg dodatkowo przekazuje w $2 POPRZEDNIO
+          # zainstalowaną wersję - dzięki temu skrypt rozróżnia świeżą
+          # instalację od aktualizacji i wyświetla odpowiedni komunikat.
+          cat > "$PKGDIR/DEBIAN/postinst" << 'POSTINSTEOF'
+          #!/bin/sh
+          set -e
+
+          case "$1" in
+            configure)
+              if [ -n "$2" ]; then
+                echo "lynis2pdf: upgraded from version $2. Run 'lynis2pdf --version' to confirm."
+              else
+                echo "lynis2pdf: installed successfully."
+                echo "lynis2pdf: usage - run 'sudo lynis audit system' to scan, then 'lynis2pdf' to build the PDF report."
+              fi
+              echo "lynis2pdf: maintained by Kamil Ciaś <kamil.cias@betternow.group> - https://betternow.group"
+              ;;
+          esac
+
+          # Odśwież cache ikon, jeśli narzędzie jest dostępne (typowo tylko na
+          # maszynach z pełnym środowiskiem graficznym) - jego brak nie jest
+          # błędem instalacji na serwerze/headless. Bezwzględna ścieżka
+          # zamiast "command -v" + gołej nazwy - ten skrypt działa jako root.
+          if [ -x /usr/bin/gtk-update-icon-cache ] && [ -d /usr/share/icons/hicolor ]; then
+            /usr/bin/gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
+          fi
+
+          exit 0
+          POSTINSTEOF
+          chmod 755 "$PKGDIR/DEBIAN/postinst"
+
+          # prerm uruchamiany PRZED usunięciem plików - zarówno przy zwykłym
+          # "remove", jak i tuż przed rozpakowaniem nowszej wersji przy upgrade.
+          cat > "$PKGDIR/DEBIAN/prerm" << 'PRERMEOF'
+          #!/bin/sh
+          set -e
+          case "$1" in
+            remove|upgrade)
+              echo "lynis2pdf: removing/upgrading package..."
+              ;;
+          esac
+          exit 0
+          PRERMEOF
+          chmod 755 "$PKGDIR/DEBIAN/prerm"
+
+          # postrm uruchamiany PO usunięciu plików. Przy "purge" (apt purge /
+          # dpkg -P) dodatkowo odświeża cache ikon, żeby nie zostawić po sobie
+          # nieistniejącego wpisu.
+          cat > "$PKGDIR/DEBIAN/postrm" << 'POSTRMEOF'
+          #!/bin/sh
+          set -e
+          case "$1" in
+            purge|remove)
+              if [ -x /usr/bin/gtk-update-icon-cache ] && [ -d /usr/share/icons/hicolor ]; then
+                /usr/bin/gtk-update-icon-cache -q /usr/share/icons/hicolor 2>/dev/null || true
+              fi
+              ;;
+          esac
+          if [ "$1" = "purge" ]; then
+            echo "lynis2pdf: package and its files have been purged."
+          fi
+          exit 0
+          POSTRMEOF
+          chmod 755 "$PKGDIR/DEBIAN/postrm"
+
+          # Celowo BEZ zmiany nazwy - plik zostaje jako
+          # lynis2pdf_<wersja>_amd64.deb (nazwa + wersja + architektura),
+          # zgodnie ze standardową konwencją nazewnictwa pakietów Debiana.
+          dpkg-deb --build --root-owner-group "$PKGDIR"
+          ls -la lynis2pdf_*.deb
+
+      - name: "Test: instalacja, aktualizacja i deinstalacja pakietu .deb"
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          DEB_FILE="lynis2pdf_${VERSION}_amd64.deb"
+
+          echo "--- Świeża instalacja ---"
+          sudo dpkg -i "$DEB_FILE"
+          lynis2pdf --version
+
+          echo "--- Weryfikacja ikony (avatara) pakietu ---"
+          test -f /usr/share/pixmaps/lynis2pdf.png
+          test -f /usr/share/icons/hicolor/256x256/apps/lynis2pdf.png
+
+          echo "--- Ponowna instalacja tej samej paczki (ćwiczy ścieżkę aktualizacji w postinst) ---"
+          sudo dpkg -i "$DEB_FILE"
+          lynis2pdf --version
+
+          echo "--- Test flagi --check-update (nie powinna nigdy zwrócić błędu) ---"
+          lynis2pdf --check-update
+
+          echo "--- Deinstalacja z purge (ćwiczy też postrm) ---"
+          sudo dpkg -P lynis2pdf
+          test ! -f /usr/share/pixmaps/lynis2pdf.png
+          echo "Kod wyjścia: $?"
+
+      - name: Wgranie jako artefakt
+        uses: actions/upload-artifact@v4
+        with:
+          name: lynis2pdf-deb-${{ steps.version.outputs.version }}
+          path: lynis2pdf_*.deb
+
+      - name: Dołączenie do Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lynis2pdf_*.deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
