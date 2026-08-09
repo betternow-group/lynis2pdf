@@ -1,0 +1,10 @@
+#!/bin/sh
+# Launcher used by the .desktop entry only (Terminal=true). Runs lynis2pdf,
+# then hands off to a live interactive shell so the terminal window the
+# desktop environment opened stays open and usable - instead of closing
+# the instant lynis2pdf (invoked with no arguments, so it just prints the
+# menu and exits) returns. A separate script file - rather than a quoted
+# "bash -c ..." string directly in Exec= - avoids relying on how any given
+# desktop environment's terminal-launching code parses nested quotes.
+/usr/bin/lynis2pdf
+exec /bin/bash

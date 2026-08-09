@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>group.betternow.lynis2pdf</id>
+  <name>lynis2pdf</name>
+  <summary>Convert Lynis security-audit results into a PDF report</summary>
+  <icon type="stock">lynis2pdf</icon>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>Kamil Ciaś</developer_name>
+  <developer id="group.betternow">
+    <name>Kamil Ciaś</name>
+  </developer>
+  <description>
+    <p>
+      lynis2pdf reads the results of a Lynis (cisofy.com/lynis) system security
+      audit and produces a professional PDF report. The report is enriched
+      with related MITRE ATT&amp;CK techniques and OWASP Top 10:2025 categories,
+      an expanded configuration-hardening checklist, and ready-to-copy
+      diagnostic commands for each finding.
+    </p>
+    <p>
+      Reports are intended for documentation, compliance evidence, archiving,
+      and presenting results to clients or management.
+    </p>
+  </description>
+  <launchable type="desktop-id">lynis2pdf.desktop</launchable>
+  <provides>
+    <binary>lynis2pdf</binary>
+  </provides>
+  <url type="homepage">https://betternow.group</url>
+  <url type="bugtracker">https://github.com/betternow-group/lynis2pdf/issues</url>
+  <project_group>betternow.group</project_group>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="1.0.4" date="2026-08-09" />
+  </releases>
+</component>

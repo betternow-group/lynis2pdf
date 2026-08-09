@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=lynis2pdf
+GenericName=Lynis PDF Report Generator
+Comment=Convert Lynis security-audit results into a professional PDF report
+Icon=lynis2pdf
+Exec=/usr/bin/lynis2pdf-launcher
+Terminal=true
+Categories=System;Security;ConsoleOnly;
+Keywords=security;audit;lynis;hardening;compliance;pdf;report;
+NoDisplay=false
